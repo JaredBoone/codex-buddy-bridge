@@ -1,1 +1,6 @@
-bleak>=0.22,<1
+# bleak 0.22.x caps out at Python 3.13 (0.22.3 is Requires-Python <3.14), so a
+# <1 pin cannot be satisfied on 3.14. The API this project uses —
+# find_device_by_filter, discover(return_adv=True), start_notify,
+# write_gatt_char(response=...), is_connected — is unchanged from 0.22 through
+# 3.x. Tested on 3.0.2 / Python 3.14.
+bleak>=0.22,<4
