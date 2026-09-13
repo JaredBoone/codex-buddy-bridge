@@ -10,6 +10,9 @@ __pycache__/
 # venv created by install.sh
 .venv/
 
+# patched Bluetooth-capable interpreter bundle, built by install.sh
+.btpython/
+
 # rendered launchd artifacts (the .template stays under version control)
 launchd/*.plist
 !launchd/*.plist.template

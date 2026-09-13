@@ -51,9 +51,9 @@
 - **interactive 仅作提示**：stick 上只显示"有交互在等待"，**回答仍然需要在
   Codex Desktop UI 里完成**——bridge 不会代替你提交选择（router 提交路径目前
   未启用）。
-- 安装脚本同时注册了 `InteractiveStart` / `InteractiveEnd` 两个 hook，作为
-  **前向兼容**：未来发出这两个事件的 Codex 版本会直接走 hook；当前稳定版不发，
-  所以退回到上面的 JSONL 推断。daemon 两条路径都处理。
+- `InteractiveStart` / `InteractiveEnd` **不是 Codex 的 hook 事件**，注册了也会
+  被忽略，所以安装脚本不再写入它们；interactive 状态仍然走上面的 JSONL 推断。
+  daemon 两条路径都处理，真出现这两个事件时依然能用。
 
 ## 工作原理
 
@@ -89,7 +89,9 @@ Codex 自动 fallback 到原生审批弹窗。**Codex 永远不会因为这个�
   无需修改固件；本桥说的是和 Claude 完全相同的 wire protocol。
 - [Codex](https://developers.openai.com/codex) CLI 或 Desktop，
   **2026 年 4 月版本或更新**（带 stable hooks）
-- Python 3.9+
+- **framework 版** Python 3.10+ —— macOS 上 `brew install python@3.14`
+  （任何 `python@3.x` keg 都行，安装脚本会挑最新的）。
+  `/usr/bin/python3` 不行，原因见下面的「为什么必须用 Homebrew Python」
 
 ## 安装
 
@@ -101,20 +103,44 @@ cd codex-buddy-bridge
 
 安装脚本会：
 
-1. 创建 `.venv/` 并安装 `bleak`
-2. 用绝对路径渲染 launchd plist 并 `launchctl load`，daemon 自动重启
-3. 在 `~/.codex/config.toml` 里加 `[features]\ncodex_hooks = true`
-4. 把 hooks 配置写进 `~/.codex/hooks.json`（`PermissionRequest / SessionStart /
-   UserPromptSubmit / Stop`，以及前向兼容的 `InteractiveStart / InteractiveEnd`），
-   已存在的 hooks.json 会被备份
-5. 打印剩余的手动步骤
+1. 选出最新的 Homebrew `python@3.x`（framework 版），把它的 `Python.app`
+   复制成 `.btpython/Python.app`，即一个能用蓝牙的解释器
+2. 用同一个解释器创建 `.venv/` 并安装 `bleak`；如果已有的 venv 建在别的
+   Python 上、或者那个 Python 已被卸载，会自动重建
+3. 用绝对路径渲染 launchd plist 并 `launchctl load`，daemon 自动重启
+4. 在 `~/.codex/config.toml` 里加 `[features]\nhooks = true`；如果还留着已废弃的
+   `codex_hooks`，会一并迁移
+5. 把 hooks 配置写进 `~/.codex/hooks.json`（`PermissionRequest / SessionStart /
+   UserPromptSubmit / Stop`），已存在的 hooks.json 会被备份
+6. 打印剩余的手动步骤
+
+想指定解释器可以用 `CODEX_BUDDY_PYTHON=/path/to/python3`。
 
 安装完成后：
 
+- **信任 hooks**：非 managed 的 hook 在信任之前根本不会执行 —— 打开 Codex TUI
+  执行 `/hooks` 并批准。信任是按 `hooks.json` 的哈希算的，所以任何改动（包括
+  重新跑 `install.sh`）之后都要重新信任。漏了这一步的表现是：hook 一次都不执行，
+  而且任何地方都不报错
 - **重启 Codex Desktop 和已开的 Codex CLI session**，让 app-server 重新加载
   hooks 配置
-- 第一次审批触发时，macOS 会弹**蓝牙权限请求**，目标是 `.venv/bin/python3`，
-  同意一次即可；之后 launchd 启动的 daemon 会继承这个权限
+
+### 为什么必须用 Homebrew Python
+
+在 launchd 下，只要 daemon 碰到 CoreBluetooth，macOS TCC 就会立刻发 `SIGABRT`，
+除非**可执行 bundle** 里声明了 `NSBluetoothAlwaysUsageDescription`。官方发布的
+Python 都没有这个 key，而 venv 的 `bin/python3` 根本不是 bundle。配上 `KeepAlive`，
+结果就是每 10 秒弹一次崩溃窗口。
+
+同一个 daemon 在终端里跑却没事，因为 TCC 把蓝牙访问算在 Terminal.app 头上 ——
+这也是为什么交互式运行永远复现不出来。
+
+所以 `install.sh` 会把 framework 里的 `Python.app` 复制到 `.btpython/`，注入这个
+key，用 ad-hoc 签名重签，再让 launchd 执行那个二进制并设好 `PYTHONHOME`。
+Xcode 的 `/usr/bin/python3` 用不了：它的 bundle 是系统签名的，既不能改也不能重签。
+
+因此 daemon **不会**弹蓝牙权限请求 —— 打过补丁的 bundle 作为后台 agent
+在首次使用时直接获得权限。
 
 ### Windows
 
@@ -215,9 +241,15 @@ codex-buddy log
 
 如果 Codex 提交审批时日志里**什么都没有**，那就是 hook 配置的问题：
 ```bash
-grep -A1 features ~/.codex/config.toml      # 应当有 codex_hooks = true
+grep -A2 features ~/.codex/config.toml      # 应当是 hooks = true，不是 codex_hooks
 cat ~/.codex/hooks.json | python3 -m json.tool
 ```
+再确认 hooks 已经被**信任**（Codex TUI 里 `/hooks`）—— 未信任的 hook 会被静默跳过，
+而 `~/.codex/logs_2.sqlite` 两种情况都不会记录 hook 执行。想确认到底跑没跑，可以在
+`hooks/permission_request.py` 开头往某个文件里追加一行。
+注意这种情况下设备上**照样会显示状态**，因为状态走的是 app-server 的 `router_client`，
+和 hook 是两条独立的路径。
+
 改完配置后**必须重启 Codex**（app-server 启动时会缓存配置）。
 
 **3. 日志写"No BLE device found"。** 跑 `codex-buddy probe`，它会扫几秒然后

@@ -13,7 +13,8 @@
 #                  daemon log says 'No BLE device found'.
 #   pair           Linux helper: pair/trust/connect a Claude-* buddy via
 #                  bluetoothctl (supports --prefix / --mac).
-#   uninstall      unload the agent and remove the plist + ~/.codex/hooks.json
+#   uninstall      unload the agent and remove the plist, ~/.codex/hooks.json
+#                  and the patched .btpython/ interpreter bundle
 
 set -euo pipefail
 
@@ -26,7 +27,7 @@ VENV_PYTHON="${BRIDGE_ROOT}/.venv/bin/python3"
 PAIR_SCRIPT="${BRIDGE_ROOT}/scripts/pair.sh"
 
 usage() {
-    sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
 }
 
@@ -113,7 +114,11 @@ case "${1:-status}" in
             rm -f "${HOOKS_JSON}"
             echo "removed ${HOOKS_JSON} (backed up to ${HOOKS_JSON}.uninstall.bak)"
         fi
-        echo "Note: codex_hooks = true in ~/.codex/config.toml was left in place; remove manually if you want."
+        if [[ -d "${BRIDGE_ROOT}/.btpython" ]]; then
+            rm -rf "${BRIDGE_ROOT}/.btpython"
+            echo "removed ${BRIDGE_ROOT}/.btpython"
+        fi
+        echo "Note: hooks = true in ~/.codex/config.toml was left in place; remove manually if you want."
         ;;
     -h|--help|help)
         usage 0
