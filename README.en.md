@@ -89,7 +89,10 @@ its native approval prompt. **Codex never hangs because of this bridge.**
   protocol Claude does.
 - [Codex](https://developers.openai.com/codex) CLI or Desktop, **April 2026
   build or newer** (stable hooks).
-- Python 3.9+.
+- A **framework** Python 3.10+ — on macOS, `brew install python@3.14`
+  (any `python@3.x` keg works; the installer picks the newest it finds).
+  `/usr/bin/python3` will not do: see
+  [Why a Homebrew Python](#why-a-homebrew-python).
 
 ## Install
 
@@ -101,23 +104,52 @@ cd codex-buddy-bridge
 
 The installer:
 
-1. Creates `.venv/` and installs `bleak`.
-2. Renders the launchd plist with absolute paths and `launchctl load`s it.
+1. Picks the newest Homebrew `python@3.x` framework build and creates
+   `.btpython/Python.app` from it — a Bluetooth-capable copy of the
+   interpreter. See [Why a Homebrew Python](#why-a-homebrew-python).
+2. Creates `.venv/` on that same interpreter and installs `bleak`. A venv
+   left over from a different or uninstalled Python is rebuilt.
+3. Renders the launchd plist with absolute paths and `launchctl load`s it.
    The daemon respawns on crash.
-3. Adds `[features]\ncodex_hooks = true` to `~/.codex/config.toml`.
-4. Writes `~/.codex/hooks.json` with `PermissionRequest / SessionStart /
-   UserPromptSubmit / Stop` entries (plus forward-compatible
-   `InteractiveStart / InteractiveEnd`) pointing at the `hooks/` scripts.
+4. Adds `[features]\nhooks = true` to `~/.codex/config.toml`, migrating the
+   deprecated `codex_hooks` flag if it is still there.
+5. Writes `~/.codex/hooks.json` with `PermissionRequest / SessionStart /
+   UserPromptSubmit / Stop` entries pointing at the `hooks/` scripts.
    Any existing `hooks.json` is backed up.
-5. Prints next manual steps.
+6. Prints next manual steps.
+
+Override the interpreter choice with `CODEX_BUDDY_PYTHON=/path/to/python3`.
 
 After install:
 
+- **Trust the hooks.** Non-managed hooks never run until you approve them:
+  open the Codex TUI and run `/hooks`. Trust is keyed on a hash of
+  `hooks.json`, so re-trust after anything rewrites it — including
+  re-running `install.sh`. Skipping this produces *zero* hook executions
+  and no error message anywhere.
 - **Restart Codex Desktop and any open Codex CLI sessions** so the
   app-server reloads the hooks config.
-- **Approve the macOS Bluetooth prompt** the first time the daemon needs
-  the buddy. The prompt targets `.venv/bin/python3`; once granted,
-  launchd-spawned runs inherit the permission.
+
+### Why a Homebrew Python
+
+Under launchd, macOS TCC sends `SIGABRT` the instant the daemon touches
+CoreBluetooth, unless the *executable bundle* declares
+`NSBluetoothAlwaysUsageDescription`. No stock Python ships that key, and a
+venv's `bin/python3` is not a bundle at all. With `KeepAlive` set, that
+becomes a crash-popup loop every 10 seconds.
+
+Run the same daemon from a terminal and it works fine, because TCC
+attributes the Bluetooth access to Terminal.app — which is why this does
+not reproduce interactively.
+
+So `install.sh` copies the framework's `Python.app` into `.btpython/`,
+injects the usage description, re-signs it ad-hoc, and points launchd at
+that binary with `PYTHONHOME` set. Xcode's `/usr/bin/python3` cannot be
+used: its bundle is system-signed, so it can be neither patched nor
+re-signed.
+
+There is consequently **no Bluetooth permission prompt** for the daemon —
+the patched bundle is granted access on first use as a background agent.
 
 ### Windows
 
@@ -223,11 +255,18 @@ You should see `Pending approval c-… for Bash: …` followed by either a
 decision or `BLE connect failed` (someone else has the device).
 
 If nothing shows up at all when Codex asks for approval, the hook config is
-the culprit:
+the culprit — note that the device still shows *status* in that case, because
+status comes from the app-server via `router_client`, a path independent of
+hooks:
 ```bash
-grep -A1 features ~/.codex/config.toml      # codex_hooks = true
+grep -A2 features ~/.codex/config.toml      # hooks = true, not codex_hooks
 cat ~/.codex/hooks.json | python3 -m json.tool
 ```
+Then confirm the hooks are **trusted** (`/hooks` in the Codex TUI) — untrusted
+hooks are skipped silently, and `~/.codex/logs_2.sqlite` never records hook
+execution either way. To prove whether they run at all, append a line to a file
+from the top of `hooks/permission_request.py`.
+
 After config changes, **restart Codex** (the app-server caches the config
 at startup).
 

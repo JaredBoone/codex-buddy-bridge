@@ -16,25 +16,25 @@ function Step([string]$Message) {
 function Ensure-CodexHooksEnabled {
     New-Item -ItemType Directory -Force -Path $CodexDir | Out-Null
     if (-not (Test-Path $ConfigToml)) {
-        Set-Content -Path $ConfigToml -Value "[features]`r`ncodex_hooks = true`r`n" -Encoding UTF8
+        Set-Content -Path $ConfigToml -Value "[features]`r`nhooks = true`r`n" -Encoding UTF8
         return
     }
 
     $content = Get-Content -Path $ConfigToml -Raw -Encoding UTF8
-    if ($content -match "(?m)^\s*codex_hooks\s*=") {
+    if ($content -match "(?m)^\s*hooks\s*=") {
         return
     }
     if ($content -match "(?m)^\[features\]\s*$") {
-        $updated = [regex]::Replace($content, "(?m)^\[features\]\s*$", "[features]`r`ncodex_hooks = true", 1)
+        $updated = [regex]::Replace($content, "(?m)^\[features\]\s*$", "[features]`r`nhooks = true", 1)
         Set-Content -Path $ConfigToml -Value $updated -Encoding UTF8
         return
     }
 
     $trimmed = $content.TrimEnd()
     $updated = if ($trimmed.Length -gt 0) {
-        "$trimmed`r`n`r`n[features]`r`ncodex_hooks = true`r`n"
+        "$trimmed`r`n`r`n[features]`r`nhooks = true`r`n"
     } else {
-        "[features]`r`ncodex_hooks = true`r`n"
+        "[features]`r`nhooks = true`r`n"
     }
     Set-Content -Path $ConfigToml -Value $updated -Encoding UTF8
 }
@@ -53,7 +53,7 @@ if (-not (Test-Path $VenvPython)) {
 & $VenvPython -m pip install --quiet --upgrade pip
 & $VenvPython -m pip install --quiet -r (Join-Path $BridgeRoot "requirements.txt")
 
-Step "Enabling codex_hooks in $ConfigToml"
+Step "Enabling [features] hooks = true in $ConfigToml"
 Ensure-CodexHooksEnabled
 
 Step "Writing $HooksJson"
@@ -109,30 +109,6 @@ $hooks = @{
                     @{
                         type = "command"
                         command = (New-HookCommand "stop.py")
-                        timeout = 3
-                    }
-                )
-            }
-        )
-        InteractiveStart = @(
-            @{
-                matcher = ".*"
-                hooks = @(
-                    @{
-                        type = "command"
-                        command = (New-HookCommand "interactive_start.py")
-                        timeout = 3
-                    }
-                )
-            }
-        )
-        InteractiveEnd = @(
-            @{
-                matcher = ".*"
-                hooks = @(
-                    @{
-                        type = "command"
-                        command = (New-HookCommand "interactive_end.py")
                         timeout = 3
                     }
                 )

@@ -5,9 +5,13 @@
     <key>Label</key>
     <string>com.claudecodebuddy.codex-buddy</string>
 
+    <!-- Not the venv's bin/python3: launchd needs the patched Python.app bundle
+         from .btpython/, which carries NSBluetoothAlwaysUsageDescription.
+         PYTHONHOME points that bundle at its framework, PYTHONPATH at the repo
+         plus the venv's site-packages. See install.sh. -->
     <key>ProgramArguments</key>
     <array>
-        <string>__VENV_PYTHON__</string>
+        <string>__PYTHON_BIN__</string>
         <string>-m</string>
         <string>codex_buddy_bridge</string>
         <string>--socket</string>
@@ -19,8 +23,10 @@
 
     <key>EnvironmentVariables</key>
     <dict>
+        <key>PYTHONHOME</key>
+        <string>__PYTHONHOME__</string>
         <key>PYTHONPATH</key>
-        <string>__BRIDGE_ROOT__</string>
+        <string>__PYTHONPATH__</string>
     </dict>
 
     <key>RunAtLoad</key>
