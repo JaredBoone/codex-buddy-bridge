@@ -89,7 +89,9 @@ python_candidates() {
     # Sort 3.14 above 3.9 numerically — `sort -V` is not portable enough here.
     for version in $(ls -d "${brew_prefix}"/opt/python@3.* 2>/dev/null \
                      | sed 's|.*/python@||' | sort -t. -k1,1n -k2,2n -r); do
-        printf '%s\n' "${brew_prefix}/opt/python@${version}/bin/python3"
+        # Newer kegs only ship bin/python3.X; the unversioned name is in libexec.
+        printf '%s\n' "${brew_prefix}/opt/python@${version}/libexec/bin/python3"
+        printf '%s\n' "${brew_prefix}/opt/python@${version}/bin/python${version}"
     done
     for version in $(ls -d /Library/Frameworks/Python.framework/Versions/3.* 2>/dev/null \
                      | sed 's|.*/||' | sort -t. -k1,1n -k2,2n -r); do
@@ -140,6 +142,18 @@ for key in NSBluetoothAlwaysUsageDescription NSBluetoothPeripheralUsageDescripti
     /usr/libexec/PlistBuddy -c "Set :${key} ${BT_REASON}" "${BTPY_INFO}" >/dev/null 2>&1 \
         || /usr/libexec/PlistBuddy -c "Add :${key} string ${BT_REASON}" "${BTPY_INFO}" >/dev/null
 done
+
+# Homebrew links Python.app against the versioned Cellar path
+# (.../Cellar/python@3.14/3.14.7/...), which `brew upgrade` deletes on the next
+# patch release — dyld then aborts the daemon at launch. Repoint it at
+# ${FRAMEWORK_DIR}, which resolves through the stable opt/ symlink. Must happen
+# before codesign, since install_name_tool invalidates the signature.
+OLD_LIBPYTHON="$(otool -L "${BTPY_BIN}" | awk '/Python\.framework\/Versions\/.*\/Python /{print $1; exit}')"
+NEW_LIBPYTHON="${FRAMEWORK_DIR}/Python"
+if [[ -n "${OLD_LIBPYTHON}" && "${OLD_LIBPYTHON}" != "${NEW_LIBPYTHON}" ]]; then
+    install_name_tool -change "${OLD_LIBPYTHON}" "${NEW_LIBPYTHON}" "${BTPY_BIN}" 2>/dev/null \
+        || die "install_name_tool failed to relink ${BTPY_BIN}"
+fi
 codesign --force --sign - "${BTPY_APP}" >/dev/null 2>&1 \
     || die "codesign failed on ${BTPY_APP}"
 
